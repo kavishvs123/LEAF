@@ -122,9 +122,6 @@ def get_dataloader(train, val):
             adj[idx2nodeid[int(j)], idx2nodeid[int(i)]] = 1
         adj_with_self_loop = adj + np.eye(adj.shape[0])
         args.adj = adj_with_self_loop
-        #--- Beginning Change ---#
-        args.predefined_adjs = [args.adj, args.adj.T]
-        #--- Ending Change ---#
     else:
         raise NotImplementedError
 
