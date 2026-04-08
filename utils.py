@@ -117,3 +117,57 @@ def denormalize_feat(feat):
 def denormalize_output(output):
     return _denormalize(output, args.output_mean, args.output_std)
 
+#--- Beginning Change ---#
+
+def get_float_adj(distance_df, num_nodes, node_order_path):
+    # 1. Create the same mapping used in get_dataloader
+    idx2nodeid = {}
+    if node_order_path is not None:
+        # This part handles PEMS03 specific ordering
+        with open(node_order_path, 'r') as f:
+            for i, line in enumerate(f):
+                idx2nodeid[int(line.strip())] = i
+    else:
+        # This handles PEMS04 and PEMS08 (direct mapping)
+        idx2nodeid = {i: i for i in range(num_nodes)}
+
+    # 2. Initialize the float adjacency matrix
+    adj_float = np.zeros((num_nodes, num_nodes), dtype=np.float32)
+
+    # 3. Fill with actual distance values (the 'd' or third column)
+    # distance_df columns are usually: [from, to, cost/distance]
+    for row in distance_df.values:
+        u_id, v_id, dist = int(row[0]), int(row[1]), float(row[2])
+        
+        if u_id in idx2nodeid and v_id in idx2nodeid:
+            u, v = idx2nodeid[u_id], idx2nodeid[v_id]
+            adj_float[u, v] = dist
+            adj_float[v, u] = dist # Assumes undirected graph
+
+    return adj_float
+
+import torch
+
+def norm_adj(adj):
+    """
+    Symmetrically normalizes the adjacency matrix: D^-1/2 * A * D^-1/2
+    Works for both single matrices and batches of matrices.
+    """
+    # adj shape is usually (Batch, N, N) or (1, N, N)
+    
+    # 1. Calculate the degree matrix (sum of each row)
+    # Add a tiny epsilon (1e-9) to prevent division by zero for isolated nodes
+    deg = torch.sum(adj, dim=-1)
+    
+    # 2. Compute D^-1/2
+    deg_inv_sqrt = torch.pow(deg + 1e-9, -0.5)
+    
+    # 3. Handle potential infinite values if any degrees were exactly 0
+    deg_inv_sqrt[torch.isinf(deg_inv_sqrt)] = 0.
+    
+    # 4. Create a diagonal matrix from the degree vector
+    d_mat_inv_sqrt = torch.diag_embed(deg_inv_sqrt)
+    
+    # 5. Return the normalized matrix: D^-1/2 @ A @ D^-1/2
+    return d_mat_inv_sqrt @ adj @ d_mat_inv_sqrt
+#--- End Change ---#

@@ -90,5 +90,5 @@ class BasicTrainer:
 def build_basic_trainer(model, train_loader, val_loader, test_loader, num_epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     criterion = nn.HuberLoss()
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=False)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20)
     return BasicTrainer(model, optimizer, scheduler, criterion, train_loader, val_loader, test_loader, num_epochs)
