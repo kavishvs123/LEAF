@@ -58,23 +58,11 @@ parser.add_argument('--verbose_metric', default=False, action='store_true', help
 
 args = parser.parse_args()
 
-### ---- Beginning Change --- ###
-if torch.backends.mps.is_available():
-    args.device = torch.device("mps")
-elif torch.cuda.is_available():
-    # If on Hex, use the integer ID provided in arguments
-    args.device = torch.device(f'cuda:{args.device}')
-else:
-    args.device = torch.device("cpu")
-### ---- End Change --- ###
-    
+args.device = torch.device('cuda:%d' % args.device)
 random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
-### ---- Beginning Change --- ###
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(args.seed)
-### ---- End Change --- ###
+torch.cuda.manual_seed(args.seed)
 os.makedirs(os.path.join(args.save, args.expid), exist_ok=True)
 os.makedirs(os.path.join(args.csv, args.expid), exist_ok=True)
 

@@ -49,8 +49,11 @@ parser.add_argument('--expid', type=str, default='debug', help='experiment id')
 parser.add_argument('--csv', type=str, default='./outputs/', help='csv path')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump', help='dump path')
 parser.add_argument('--dump', default=False, action='store_true', help='dump results')
-
-parser.add_argument('--ckpt_paths', type=str, nargs='+', default=[], help='pretrained model paths')
+#--- Beginning Change ---#
+parser.add_argument('--ckpt_paths', type=str, nargs='+',
+                    default=['ckpts/baseline_pems04/GraphBranch.pth', 'ckpts/hyper_baseline_pems04/HypergraphBranch.pth'],
+                    help='pretrained model paths')
+#--- Ending Change ---#
 parser.add_argument('--disable_aug', default=False, action='store_true', help='disable augmentation')
 parser.add_argument('--disable_graph', default=False, action='store_true', help='disable graph')
 parser.add_argument('--disable_hypergraph', default=False, action='store_true', help='disable hypergraph')
