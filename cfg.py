@@ -51,7 +51,7 @@ parser.add_argument('--dump_dir', type=str, default='./outputs/dump', help='dump
 parser.add_argument('--dump', default=False, action='store_true', help='dump results')
 #--- Beginning Change ---#
 parser.add_argument('--ckpt_paths', type=str, nargs='+',
-                    default=['ckpts/baseline_pems04/GraphBranch.pth', 'ckpts/hyper_baseline_pems04/HypergraphBranch.pth'],
+                    default=['ckpts/pems08_baseline/GraphBranch.pth', 'ckpts/pems08_hyper_baseline/HypergraphBranch.pth'],
                     help='pretrained model paths')
 #--- Ending Change ---#
 parser.add_argument('--disable_aug', default=False, action='store_true', help='disable augmentation')
