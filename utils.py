@@ -146,8 +146,6 @@ def get_float_adj(distance_df, num_nodes, node_order_path):
 
     return adj_float
 
-import torch
-
 def norm_adj(adj):
     """
     Symmetrically normalizes the adjacency matrix: D^-1/2 * A * D^-1/2
