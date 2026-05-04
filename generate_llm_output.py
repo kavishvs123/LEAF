@@ -24,12 +24,16 @@ parser.add_argument('--model_path', type=str, default='meta-llama/Llama-3.1-8B-I
                     help='HuggingFace model ID or local path to LLaMA weights')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump')
 parser.add_argument('--output_dir', type=str, default='./data/llm_output')
-parser.add_argument('--batch_size', type=int, default=64, help='Number of prompts to send to vllm at once')
-parser.add_argument('--max_tokens', type=int, default=512,
+parser.add_argument('--batch_size', type=int, default=16, help='Number of prompts to send to vllm at once')
+parser.add_argument('--max_tokens', type=int, default=128,
                     help='Max tokens — needs to be high enough for chain-of-thought reasoning')
 parser.add_argument('--temperature', type=float, default=0.0)
-parser.add_argument('--max_model_len', type=int, default=32768,
+parser.add_argument('--max_model_len', type=int, default=16384,
                     help='Max sequence length for vllm KV cache — reduce if GPU OOM')
+parser.add_argument('--gpu_memory_utilization', type=float, default=0.95,
+                    help='Fraction of GPU memory vllm can use for KV cache')
+parser.add_argument('--enforce_eager', action='store_true', default=True,
+                    help='Disable CUDA graphs to free 1-3GB extra GPU memory')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
                     help='Which round: 1 writes _output.json, 2 writes _output_r2.json')
 args = parser.parse_args()
@@ -190,7 +194,12 @@ print(f'Loading model: {args.model_path}')
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-llm = LLM(model=args.model_path, max_model_len=args.max_model_len)
+llm = LLM(
+    model=args.model_path,
+    max_model_len=args.max_model_len,
+    gpu_memory_utilization=args.gpu_memory_utilization,
+    enforce_eager=args.enforce_eager,
+)
 sampling_params = SamplingParams(
     temperature=args.temperature,
     max_tokens=args.max_tokens,
