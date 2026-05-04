@@ -1,5 +1,9 @@
 """
-Reads the choices dump produced by running with --selector_type optimal --dump, builds prompts matching the paper's Figure 8 template, queries a local LLaMA model via vllm, and writes the LLM selections to
+generate_llm_output.py
+
+Reads the choices dump produced by running with --selector_type optimal --dump,
+builds prompts matching the paper's Figure 8 template, queries a local LLaMA
+model via vllm, and writes the LLM selections to
 data/llm_output/{dataset}_output.json.
 
 Usage:
@@ -7,7 +11,6 @@ Usage:
     python generate_llm_output.py --dataset PEMS08 --model_path /path/to/llama --batch_size 64
 """
 
-from vllm import LLM, SamplingParams
 import argparse
 import json
 import os
@@ -17,15 +20,20 @@ import pandas as pd
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='PEMS08', choices=['PEMS03', 'PEMS04', 'PEMS08'])
 parser.add_argument('--postfix', type=str, default='', help='Postfix used during the optimal selector dump (e.g. _noaug)')
-parser.add_argument('--model_path', type=str, default='meta-llama/Llama-3.1-8B-Instruct', help='HuggingFace model ID or local path to LLaMA weights')
+parser.add_argument('--model_path', type=str, default='meta-llama/Llama-3.1-8B-Instruct',
+                    help='HuggingFace model ID or local path to LLaMA weights')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump')
 parser.add_argument('--output_dir', type=str, default='./data/llm_output')
 parser.add_argument('--batch_size', type=int, default=64, help='Number of prompts to send to vllm at once')
-parser.add_argument('--max_tokens', type=int, default=512, help='Max tokens — needs to be high enough for chain-of-thought reasoning')
+parser.add_argument('--max_tokens', type=int, default=512,
+                    help='Max tokens — needs to be high enough for chain-of-thought reasoning')
 parser.add_argument('--temperature', type=float, default=0.0)
+parser.add_argument('--max_model_len', type=int, default=32768,
+                    help='Max sequence length for vllm KV cache — reduce if GPU OOM')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
                     help='Which round: 1 writes _output.json, 2 writes _output_r2.json')
 args = parser.parse_args()
+
 
 # ── Dataset metadata ──────────────────────────────────────────────────────────
 
@@ -46,6 +54,7 @@ MODEL_LABELS = {
     'HypergraphBranch': 'the hypergraph branch',
 }
 
+
 # ── Load adjacency for spatial info ───────────────────────────────────────────
 # Build a neighbour list from the edge CSV so we can describe each sensor's
 # spatial context in the prompt, matching "<spatial information of the vertex>".
@@ -64,6 +73,7 @@ def load_neighbours(dataset: str) -> dict:
     return neighbours
 
 neighbours = load_neighbours(args.dataset)
+
 
 # ── File paths ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +105,7 @@ if len(entries) == 0:
     )
 
 print(f'Loaded {len(entries)} entries.')
+
 
 # ── Prompt builder (matching paper Figure 8) ───────────────────────────────────
 
@@ -176,8 +187,9 @@ def parse_answer(text: str, num_candidates: int):
 # ── vllm inference ─────────────────────────────────────────────────────────────
 
 print(f'Loading model: {args.model_path}')
+from vllm import LLM, SamplingParams
 
-llm = LLM(model=args.model_path)
+llm = LLM(model=args.model_path, max_model_len=args.max_model_len)
 sampling_params = SamplingParams(
     temperature=args.temperature,
     max_tokens=args.max_tokens,
@@ -203,16 +215,17 @@ output_data = []
 none_count  = 0
 
 for entry, result in zip(entries, raw_outputs):
-    text = result.outputs[0].text
+    text          = result.outputs[0].text
     num_candidates = len(entry['choices'])
-    answer = parse_answer(text, num_candidates)
+    answer        = parse_answer(text, num_candidates)
     if answer is None:
         none_count += 1
     output_data.append({'final_answer': answer, 'raw_response': text})
 
 print(
     f'Done. Unparseable responses: {none_count} / {len(entries)} '
-    f'(these default to candidate 1 at inference time)')
+    f'(these default to candidate 1 at inference time)'
+)
 
 with open(output_path, 'w') as f:
     json.dump(output_data, f)
