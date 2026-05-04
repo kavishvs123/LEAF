@@ -188,6 +188,7 @@ def parse_answer(text: str, num_candidates: int):
 
 print(f'Loading model: {args.model_path}')
 from vllm import LLM, SamplingParams
+from transformers import AutoTokenizer
 
 llm = LLM(model=args.model_path, max_model_len=args.max_model_len)
 sampling_params = SamplingParams(
@@ -195,9 +196,21 @@ sampling_params = SamplingParams(
     max_tokens=args.max_tokens,
 )
 
-# Build all prompts upfront
+# Load tokenizer to check/truncate prompt lengths before sending to vllm.
+# Max prompt length = max_model_len minus space reserved for the output tokens.
+tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+max_prompt_tokens = args.max_model_len - args.max_tokens
+
+def truncate_prompt(prompt: str) -> str:
+    tokens = tokenizer.encode(prompt)
+    if len(tokens) > max_prompt_tokens:
+        tokens = tokens[:max_prompt_tokens]
+        return tokenizer.decode(tokens, skip_special_tokens=True)
+    return prompt
+
+# Build all prompts upfront and truncate any that exceed the token budget
 print('Building prompts...')
-prompts = [build_prompt(e) for e in entries]
+prompts = [truncate_prompt(build_prompt(e)) for e in entries]
 
 # Run inference in batches
 print(f'Running inference on {len(prompts)} prompts (batch size {args.batch_size})...')
