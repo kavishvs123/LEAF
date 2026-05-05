@@ -3,18 +3,21 @@ generate_llm_output.py
 
 Reads the choices dump produced by running with --selector_type optimal --dump,
 builds prompts matching the paper's Figure 8 template, queries a local LLaMA
-model via vllm, and writes the LLM selections to
-data/llm_output/{dataset}_output.json.
+model via vllm, and writes the LLM selections to a per-GPU JSONL file.
 
 Uses streaming JSON input (ijson) and line-by-line output (JSONL) so that
 RAM usage stays constant regardless of dataset size. Supports resume if killed.
 
+Once all three GPU scripts finish, run combine_llm_output.py to merge the
+three JSONL files into the final pems08_output.json.
+
 Requirements:
     pip install ijson
 
-Usage:
-    python generate_llm_output.py --dataset PEMS08
-    python generate_llm_output.py --dataset PEMS08 --model_path /path/to/llama
+Usage — run each in a separate terminal simultaneously:
+    CUDA_VISIBLE_DEVICES=0 python generate_llm_output.py --dataset PEMS08 --model_path meta-llama/Llama-3.1-8B-Instruct --start_idx 0 --end_idx 808180
+    CUDA_VISIBLE_DEVICES=1 python generate_llm_output.py --dataset PEMS08 --model_path meta-llama/Llama-3.1-8B-Instruct --start_idx 808180 --end_idx 1616360
+    CUDA_VISIBLE_DEVICES=2 python generate_llm_output.py --dataset PEMS08 --model_path meta-llama/Llama-3.1-8B-Instruct --start_idx 1616360 --end_idx 2424540
 """
 
 import argparse
@@ -46,6 +49,10 @@ parser.add_argument('--enforce_eager', action='store_true', default=True,
                     help='Disable CUDA graphs to free 1-3GB extra GPU memory')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
                     help='Which round: 1 writes _output.json, 2 writes _output_r2.json')
+parser.add_argument('--start_idx', type=int, default=0,
+                    help='Global entry index to start from (inclusive)')
+parser.add_argument('--end_idx', type=int, default=None,
+                    help='Global entry index to stop at (exclusive). Defaults to end of file.')
 args = parser.parse_args()
 
 
@@ -87,34 +94,41 @@ neighbours = load_neighbours(args.dataset)
 
 # ── File paths ─────────────────────────────────────────────────────────────────
 
-dataset = args.dataset.lower()
-postfix = args.postfix
+dataset  = args.dataset.lower()
+postfix  = args.postfix
+end_idx  = args.end_idx  # may be None (process to end of file)
 
 if args.round == 1:
     choices_path = os.path.join(args.dump_dir, f'{dataset}_choices{postfix}.json')
-    output_path  = os.path.join(args.output_dir, f'{dataset}_output{postfix}.json')
+    base_name    = f'{dataset}_output{postfix}'
 else:
     choices_path = os.path.join(args.dump_dir, f'{dataset}_choices_r2{postfix}.json')
-    output_path  = os.path.join(args.output_dir, f'{dataset}_output_r2{postfix}.json')
+    base_name    = f'{dataset}_output_r2{postfix}'
 
-# JSONL file written to incrementally during processing
-jsonl_path = output_path + '.jsonl'
+# Each GPU writes to its own JSONL file named with its index range
+jsonl_filename = f'{base_name}_{args.start_idx}_{end_idx}.jsonl'
+jsonl_path     = os.path.join(args.output_dir, jsonl_filename)
 
 os.makedirs(args.output_dir, exist_ok=True)
 
+print(f'GPU range: entries {args.start_idx} to {end_idx}')
+print(f'Output file: {jsonl_path}')
 
-# ── Resume: count already-completed lines in JSONL ────────────────────────────
 
-start_idx  = 0
-none_count = 0
+# ── Resume: count already-completed lines in this GPU's JSONL ─────────────────
+
+completed_count = 0
+none_count      = 0
 
 if os.path.exists(jsonl_path):
     with open(jsonl_path, 'r') as f:
         lines = f.readlines()
-    start_idx  = len(lines)
-    none_count = sum(1 for l in lines if json.loads(l)['final_answer'] is None)
-    print(f'Resuming from entry {start_idx} (already completed).')
+    completed_count = len(lines)
+    none_count      = sum(1 for l in lines if json.loads(l)['final_answer'] is None)
+    resume_from     = args.start_idx + completed_count
+    print(f'Resuming from global entry {resume_from} ({completed_count} already done).')
 else:
+    resume_from = args.start_idx
     print('Starting fresh run.')
 
 
@@ -199,7 +213,7 @@ sampling_params = SamplingParams(
     max_tokens=args.max_tokens,
 )
 
-tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+tokenizer         = AutoTokenizer.from_pretrained(args.model_path)
 max_prompt_tokens = args.max_model_len - args.max_tokens
 
 def truncate_prompt(prompt: str) -> str:
@@ -211,8 +225,6 @@ def truncate_prompt(prompt: str) -> str:
 
 
 # ── Main loop — stream input, write output line by line ───────────────────────
-
-print(f'Streaming entries from {choices_path} (skipping first {start_idx})...')
 
 chunk_entries = []
 global_idx    = 0
@@ -235,11 +247,23 @@ def flush_chunk(chunk_entries, jsonl_file):
         jsonl_file.write(json.dumps({'final_answer': answer, 'raw_response': text}) + '\n')
     jsonl_file.flush()
 
+print(f'Streaming entries from {choices_path}...')
+
 with open(jsonl_path, 'a') as jsonl_file:
     with open(choices_path, 'rb') as f:
         for entry in ijson.items(f, 'item'):
-            # Skip already-completed entries
-            if global_idx < start_idx:
+
+            # Skip entries before this GPU's range
+            if global_idx < args.start_idx:
+                global_idx += 1
+                continue
+
+            # Stop at end of this GPU's range
+            if end_idx is not None and global_idx >= end_idx:
+                break
+
+            # Skip entries already completed in a previous run
+            if global_idx < resume_from:
                 global_idx += 1
                 continue
 
@@ -249,25 +273,16 @@ with open(jsonl_path, 'a') as jsonl_file:
             if len(chunk_entries) == args.chunk_size:
                 flush_chunk(chunk_entries, jsonl_file)
                 chunk_entries = []
-                print(f'  Saved progress: {global_idx} / ? (unparseable so far: {none_count})')
+                print(f'  Saved progress: {global_idx} / {end_idx} '
+                      f'(unparseable so far: {none_count})')
 
     # Final partial chunk
     if chunk_entries:
         flush_chunk(chunk_entries, jsonl_file)
-        print(f'  Saved progress: {global_idx} (unparseable so far: {none_count})')
+        print(f'  Saved progress: {global_idx} / {end_idx} '
+              f'(unparseable so far: {none_count})')
 
-
-# ── Convert JSONL → JSON list (required by LLMSelectorFromJson) ───────────────
-
-print('Converting JSONL to final JSON...')
-with open(jsonl_path, 'r') as f:
-    output_data = [json.loads(line) for line in f]
-
-with open(output_path, 'w') as f:
-    json.dump(output_data, f)
-
-os.remove(jsonl_path)
-
-print(f'\nDone. Total entries: {len(output_data)}')
-print(f'Unparseable responses: {none_count} (default to candidate 1 at inference time)')
-print(f'Saved to: {output_path}')
+print(f'\nGPU chunk complete. Entries {args.start_idx} to {end_idx} done.')
+print(f'Unparseable: {none_count}')
+print(f'Output: {jsonl_path}')
+print(f'Run combine_llm_output.py once all GPUs are finished.')
