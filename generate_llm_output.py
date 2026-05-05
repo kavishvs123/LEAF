@@ -6,8 +6,11 @@ builds prompts matching the paper's Figure 8 template, queries a local LLaMA
 model via vllm, and writes the LLM selections to
 data/llm_output/{dataset}_output.json.
 
-Processes entries in chunks to keep RAM usage low, and saves progress
-incrementally so the run can be resumed if interrupted.
+Uses streaming JSON input (ijson) and line-by-line output (JSONL) so that
+RAM usage stays constant regardless of dataset size. Supports resume if killed.
+
+Requirements:
+    pip install ijson
 
 Usage:
     python generate_llm_output.py --dataset PEMS08
@@ -19,6 +22,7 @@ import json
 import os
 import re
 import pandas as pd
+import ijson
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='PEMS08', choices=['PEMS03', 'PEMS04', 'PEMS08'])
@@ -30,7 +34,7 @@ parser.add_argument('--output_dir', type=str, default='./data/llm_output')
 parser.add_argument('--batch_size', type=int, default=16,
                     help='Number of prompts per vllm call')
 parser.add_argument('--chunk_size', type=int, default=1000,
-                    help='Number of entries to process before saving progress to disk')
+                    help='Number of entries to process before flushing to disk')
 parser.add_argument('--max_tokens', type=int, default=128,
                     help='Max output tokens per prompt (chain-of-thought)')
 parser.add_argument('--temperature', type=float, default=0.0)
@@ -93,40 +97,23 @@ else:
     choices_path = os.path.join(args.dump_dir, f'{dataset}_choices_r2{postfix}.json')
     output_path  = os.path.join(args.output_dir, f'{dataset}_output_r2{postfix}.json')
 
-# Temporary file written to incrementally — renamed to output_path on completion
-tmp_output_path = output_path + '.tmp'
+# JSONL file written to incrementally during processing
+jsonl_path = output_path + '.jsonl'
 
 os.makedirs(args.output_dir, exist_ok=True)
 
-print(f'Loading choices from: {choices_path}')
-with open(choices_path, 'r') as f:
-    entries = json.load(f)
 
-if len(entries) == 0:
-    raise ValueError(
-        f'{choices_path} is empty. '
-        f'Run the optimal selector first:\n'
-        f'  python main.py --dataset {args.dataset} --method select '
-        f'--model_list GraphBranch HypergraphBranch '
-        f'--adapter_type aug --selector_type optimal '
-        f'--update_iters 0 '
-        f'--ckpt_paths <graph.pth> <hypergraph.pth> --dump'
-    )
+# ── Resume: count already-completed lines in JSONL ────────────────────────────
 
-total = len(entries)
-print(f'Loaded {total} entries.')
+start_idx  = 0
+none_count = 0
 
-
-# ── Resume from previous partial run ─────────────────────────────────────────
-
-start_idx = 0
-completed = []
-
-if os.path.exists(tmp_output_path):
-    with open(tmp_output_path, 'r') as f:
-        completed = json.load(f)
-    start_idx = len(completed)
-    print(f'Resuming from entry {start_idx} / {total} ({start_idx} already done).')
+if os.path.exists(jsonl_path):
+    with open(jsonl_path, 'r') as f:
+        lines = f.readlines()
+    start_idx  = len(lines)
+    none_count = sum(1 for l in lines if json.loads(l)['final_answer'] is None)
+    print(f'Resuming from entry {start_idx} (already completed).')
 else:
     print('Starting fresh run.')
 
@@ -134,15 +121,15 @@ else:
 # ── Prompt builder (matching paper Figure 8) ──────────────────────────────────
 
 def build_prompt(entry: dict) -> str:
-    node_idx    = entry['node_idx']
-    history     = entry['history']
-    choices     = entry['choices']
-    model_names = entry['model_names']
-    aug_types   = entry['aug_types']
-    input_start = entry['input_start_time']
-    input_end   = entry['input_end_time']
+    node_idx     = entry['node_idx']
+    history      = entry['history']
+    choices      = entry['choices']
+    model_names  = entry['model_names']
+    aug_types    = entry['aug_types']
+    input_start  = entry['input_start_time']
+    input_end    = entry['input_end_time']
     output_start = entry['output_start_time']
-    output_end  = entry['output_end_time']
+    output_end   = entry['output_end_time']
 
     neighbour_ids = neighbours.get(node_idx, [])
     spatial_info  = f'connected to sensors {neighbour_ids}' if neighbour_ids else 'spatial information unavailable'
@@ -223,46 +210,64 @@ def truncate_prompt(prompt: str) -> str:
     return prompt
 
 
-# ── Main loop — process in chunks, save after each chunk ─────────────────────
+# ── Main loop — stream input, write output line by line ───────────────────────
 
-none_count = sum(1 for r in completed if r['final_answer'] is None)
+print(f'Streaming entries from {choices_path} (skipping first {start_idx})...')
 
-print(f'Processing {total - start_idx} remaining entries '
-      f'(chunk size {args.chunk_size}, batch size {args.batch_size})...')
+chunk_entries = []
+global_idx    = 0
 
-for chunk_start in range(start_idx, total, args.chunk_size):
-    chunk_end     = min(chunk_start + args.chunk_size, total)
-    chunk_entries = entries[chunk_start:chunk_end]
-
-    # Build and truncate prompts for this chunk only
-    chunk_prompts = [truncate_prompt(build_prompt(e)) for e in chunk_entries]
-
-    # Run vllm in batches within the chunk
-    chunk_results = []
-    for batch_start in range(0, len(chunk_prompts), args.batch_size):
-        batch   = chunk_prompts[batch_start:batch_start + args.batch_size]
+def flush_chunk(chunk_entries, jsonl_file):
+    """Run vllm on a chunk and append results to the JSONL file."""
+    global none_count
+    prompts = [truncate_prompt(build_prompt(e)) for e in chunk_entries]
+    results = []
+    for batch_start in range(0, len(prompts), args.batch_size):
+        batch   = prompts[batch_start:batch_start + args.batch_size]
         outputs = llm.generate(batch, sampling_params)
-        chunk_results.extend(outputs)
-
-    # Parse results and append to completed list
-    for entry, result in zip(chunk_entries, chunk_results):
+        results.extend(outputs)
+    for entry, result in zip(chunk_entries, results):
         text           = result.outputs[0].text
         num_candidates = len(entry['choices'])
         answer         = parse_answer(text, num_candidates)
         if answer is None:
             none_count += 1
-        completed.append({'final_answer': answer, 'raw_response': text})
+        jsonl_file.write(json.dumps({'final_answer': answer, 'raw_response': text}) + '\n')
+    jsonl_file.flush()
 
-    # Save progress to tmp file after every chunk
-    with open(tmp_output_path, 'w') as f:
-        json.dump(completed, f)
+with open(jsonl_path, 'a') as jsonl_file:
+    with open(choices_path, 'rb') as f:
+        for entry in ijson.items(f, 'item'):
+            # Skip already-completed entries
+            if global_idx < start_idx:
+                global_idx += 1
+                continue
 
-    print(f'  Saved progress: {chunk_end} / {total} '
-          f'(unparseable so far: {none_count})')
+            chunk_entries.append(entry)
+            global_idx += 1
 
-# ── Finalise ──────────────────────────────────────────────────────────────────
+            if len(chunk_entries) == args.chunk_size:
+                flush_chunk(chunk_entries, jsonl_file)
+                chunk_entries = []
+                print(f'  Saved progress: {global_idx} / ? (unparseable so far: {none_count})')
 
-os.replace(tmp_output_path, output_path)
-print(f'\nDone. Unparseable responses: {none_count} / {total} '
-      f'(these default to candidate 1 at inference time)')
+    # Final partial chunk
+    if chunk_entries:
+        flush_chunk(chunk_entries, jsonl_file)
+        print(f'  Saved progress: {global_idx} (unparseable so far: {none_count})')
+
+
+# ── Convert JSONL → JSON list (required by LLMSelectorFromJson) ───────────────
+
+print('Converting JSONL to final JSON...')
+with open(jsonl_path, 'r') as f:
+    output_data = [json.loads(line) for line in f]
+
+with open(output_path, 'w') as f:
+    json.dump(output_data, f)
+
+os.remove(jsonl_path)
+
+print(f'\nDone. Total entries: {len(output_data)}')
+print(f'Unparseable responses: {none_count} (default to candidate 1 at inference time)')
 print(f'Saved to: {output_path}')
