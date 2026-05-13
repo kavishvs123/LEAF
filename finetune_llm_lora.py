@@ -200,7 +200,7 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 
 model = AutoModelForCausalLM.from_pretrained(
     args.model_path,
-    dtype=torch.bfloat16,
+    torch_dtype=torch.bfloat16,
     device_map='auto',
     trust_remote_code=True,
 )
