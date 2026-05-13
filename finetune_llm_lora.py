@@ -51,7 +51,7 @@ parser.add_argument('--lora_r', type=int, default=16,
 parser.add_argument('--lora_alpha', type=int, default=32,
                     help='LoRA scaling factor — typically 2x lora_r')
 parser.add_argument('--lora_dropout', type=float, default=0.05)
-parser.add_argument('--max_seq_len', type=int, default=1024,
+parser.add_argument('--max_seq_len', type=int, default=2048,
                     help='Max token length for training examples')
 parser.add_argument('--seed', type=int, default=42)
 args = parser.parse_args()
