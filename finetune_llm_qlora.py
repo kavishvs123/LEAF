@@ -78,7 +78,7 @@ MODEL_LABELS = {
     'HypergraphBranch': 'the hypergraph branch',
 }
 
-RESPONSE_TEMPLATE = '\n### Selected candidate: '
+RESPONSE_TEMPLATE = '### Selected candidate: '
 
 
 # ── Load adjacency for spatial info ───────────────────────────────────────────
@@ -152,10 +152,15 @@ def build_prompt(entry: dict) -> str:
 
 
 def build_training_text(entry: dict) -> str:
-    """Full training text = prompt + response template + ground truth answer."""
+    """Full training text = prompt + response template + ground truth answer.
+
+    The newline before the template is kept in the text but excluded from
+    RESPONSE_TEMPLATE itself so DataCollatorForCompletionOnlyLM can find
+    the token sequence reliably (leading \\n shifts token boundaries).
+    """
     prompt      = build_prompt(entry)
     answer      = str(entry['optimal_idx'] + 1)  # convert 0-indexed to 1-indexed
-    return prompt + RESPONSE_TEMPLATE + answer
+    return prompt + '\n' + RESPONSE_TEMPLATE + answer
 
 
 # ── Sample entries from choices file using reservoir sampling ─────────────────
