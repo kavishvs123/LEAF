@@ -37,9 +37,9 @@ parser.add_argument('--model_path', type=str, default='meta-llama/Llama-3.1-8B-I
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump')
 parser.add_argument('--output_dir', type=str, default='./outputs/qlora',
                     help='Where to save the QLoRA adapter weights')
-parser.add_argument('--num_samples', type=int, default=100000,
+parser.add_argument('--num_samples', type=int, default=500000,
                     help='Number of entries to sample from choices file for training')
-parser.add_argument('--num_epochs', type=int, default=3)
+parser.add_argument('--num_epochs', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=4,
                     help='Per-device training batch size')
 parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
@@ -256,7 +256,9 @@ training_args = TrainingArguments(
     bf16=True,
     fp16=False,
     logging_steps=100,
-    save_strategy='epoch',
+    save_strategy='steps',
+    save_steps=500,
+    save_total_limit=2,         # keep only the 2 most recent checkpoints
     warmup_steps=500,
     lr_scheduler_type='cosine',
     report_to='none',
@@ -274,7 +276,9 @@ trainer = SFTTrainer(
 )
 
 print('Starting fine-tuning...')
-trainer.train()
+# resume_from_checkpoint=True automatically picks up the latest checkpoint
+# in output_dir if one exists, otherwise starts fresh
+trainer.train(resume_from_checkpoint=True)
 
 
 # ── Save LoRA adapter ─────────────────────────────────────────────────────────
