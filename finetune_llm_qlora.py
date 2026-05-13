@@ -276,9 +276,12 @@ trainer = SFTTrainer(
 )
 
 print('Starting fine-tuning...')
-# resume_from_checkpoint=True automatically picks up the latest checkpoint
-# in output_dir if one exists, otherwise starts fresh
-trainer.train(resume_from_checkpoint=True)
+# Resume from the latest checkpoint if one exists, otherwise start fresh
+checkpoints = [d for d in os.listdir(args.output_dir) if d.startswith('checkpoint-')]
+resume = sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1] if checkpoints else False
+if resume:
+    print(f'Resuming from checkpoint: {resume}')
+trainer.train(resume_from_checkpoint=resume)
 
 
 # ── Save LoRA adapter ─────────────────────────────────────────────────────────
