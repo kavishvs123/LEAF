@@ -78,7 +78,7 @@ MODEL_LABELS = {
     'HypergraphBranch': 'the hypergraph branch',
 }
 
-RESPONSE_TEMPLATE = '\nAnswer: '
+RESPONSE_TEMPLATE = '\n### Selected candidate: '
 
 
 # ── Load adjacency for spatial info ───────────────────────────────────────────
