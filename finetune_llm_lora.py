@@ -41,9 +41,9 @@ parser.add_argument('--output_dir', type=str, default='./outputs/lora',
 parser.add_argument('--num_samples', type=int, default=100000,
                     help='Number of entries to sample from choices file for training')
 parser.add_argument('--num_epochs', type=int, default=3)
-parser.add_argument('--batch_size', type=int, default=4,
+parser.add_argument('--batch_size', type=int, default=1,
                     help='Per-device training batch size')
-parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
+parser.add_argument('--gradient_accumulation_steps', type=int, default=16,
                     help='Accumulate gradients over N steps before updating weights')
 parser.add_argument('--learning_rate', type=float, default=2e-4)
 parser.add_argument('--lora_r', type=int, default=16,
@@ -223,6 +223,8 @@ lora_config = LoraConfig(
 
 model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
+model.enable_input_require_grads()
+model.gradient_checkpointing_enable()
 
 
 # ── Data collator — only compute loss on the answer, not the prompt ───────────
