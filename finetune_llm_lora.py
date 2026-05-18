@@ -253,7 +253,7 @@ training_args = TrainingArguments(
     logging_steps=100,
     save_strategy='steps',
     save_steps=500,
-    save_total_limit=2,         # keep only the 2 most recent checkpoints
+    save_total_limit=5,         # keep the 5 most recent checkpoints
     warmup_steps=500,
     lr_scheduler_type='cosine',
     report_to='none',
@@ -273,7 +273,7 @@ trainer = SFTTrainer(
 print('Starting fine-tuning...')
 # Resume from the latest checkpoint if one exists, otherwise start fresh
 checkpoints = [d for d in os.listdir(args.output_dir) if d.startswith('checkpoint-')]
-resume = sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1] if checkpoints else False
+resume = os.path.join(args.output_dir, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1]) if checkpoints else False
 if resume:
     print(f'Resuming from checkpoint: {resume}')
 trainer.train(resume_from_checkpoint=resume)
