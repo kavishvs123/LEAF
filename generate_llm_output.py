@@ -49,6 +49,11 @@ parser.add_argument('--enforce_eager', action='store_true', default=True,
                     help='Disable CUDA graphs to free 1-3GB extra GPU memory')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
                     help='Which round: 1 writes _output.json, 2 writes _output_r2.json')
+parser.add_argument('--lora_path', type=str, default=None,
+                    help='Path to a fine-tuned LoRA/QLoRA adapter directory. '
+                         'If provided, the adapter is loaded on top of --model_path.')
+parser.add_argument('--lora_r', type=int, default=16,
+                    help='LoRA rank used during fine-tuning (must match adapter)')
 parser.add_argument('--start_idx', type=int, default=0,
                     help='Global entry index to start from (inclusive)')
 parser.add_argument('--end_idx', type=int, default=None,
@@ -199,15 +204,31 @@ def parse_answer(text: str, num_candidates: int):
 # ── vllm inference ─────────────────────────────────────────────────────────────
 
 print(f'Loading model: {args.model_path}')
+if args.lora_path:
+    print(f'Using LoRA adapter: {args.lora_path}')
 from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 from transformers import AutoTokenizer
 
-llm = LLM(
-    model=args.model_path,
-    max_model_len=args.max_model_len,
-    gpu_memory_utilization=args.gpu_memory_utilization,
-    enforce_eager=args.enforce_eager,
-)
+if args.lora_path:
+    llm = LLM(
+        model=args.model_path,
+        enable_lora=True,
+        max_lora_rank=args.lora_r,
+        max_model_len=args.max_model_len,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+        enforce_eager=args.enforce_eager,
+    )
+    lora_request = LoRARequest('finetuned', 1, args.lora_path)
+else:
+    llm = LLM(
+        model=args.model_path,
+        max_model_len=args.max_model_len,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+        enforce_eager=args.enforce_eager,
+    )
+    lora_request = None
+
 sampling_params = SamplingParams(
     temperature=args.temperature,
     max_tokens=args.max_tokens,
@@ -236,7 +257,7 @@ def flush_chunk(chunk_entries, jsonl_file):
     results = []
     for batch_start in range(0, len(prompts), args.batch_size):
         batch   = prompts[batch_start:batch_start + args.batch_size]
-        outputs = llm.generate(batch, sampling_params)
+        outputs = llm.generate(batch, sampling_params, lora_request=lora_request)
         results.extend(outputs)
     for entry, result in zip(chunk_entries, results):
         text           = result.outputs[0].text
