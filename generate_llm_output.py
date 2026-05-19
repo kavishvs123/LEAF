@@ -29,7 +29,8 @@ import ijson
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='PEMS08', choices=['PEMS03', 'PEMS04', 'PEMS08'])
-parser.add_argument('--postfix', type=str, default='', help='Postfix used during the optimal selector dump (e.g. _noaug)')
+parser.add_argument('--postfix', type=str, default='', help='Postfix of the input choices file from the optimal selector dump (e.g. _noaug)')
+parser.add_argument('--output_postfix', type=str, default=None, help='Postfix for the output file (e.g. _lora, _qlora). Defaults to --postfix if not set.')
 parser.add_argument('--model_path', type=str, default='meta-llama/Llama-3.1-8B-Instruct',
                     help='HuggingFace model ID or local path to LLaMA weights')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump')
@@ -99,16 +100,17 @@ neighbours = load_neighbours(args.dataset)
 
 # ── File paths ─────────────────────────────────────────────────────────────────
 
-dataset  = args.dataset.lower()
-postfix  = args.postfix
-end_idx  = args.end_idx  # may be None (process to end of file)
+dataset        = args.dataset.lower()
+postfix        = args.postfix                                          # controls input choices file
+output_postfix = args.output_postfix if args.output_postfix is not None else args.postfix  # controls output file
+end_idx        = args.end_idx  # may be None (process to end of file)
 
 if args.round == 1:
     choices_path = os.path.join(args.dump_dir, f'{dataset}_choices{postfix}.json')
-    base_name    = f'{dataset}_output{postfix}'
+    base_name    = f'{dataset}_output{output_postfix}'
 else:
     choices_path = os.path.join(args.dump_dir, f'{dataset}_choices_r2{postfix}.json')
-    base_name    = f'{dataset}_output_r2{postfix}'
+    base_name    = f'{dataset}_output_r2{output_postfix}'
 
 # Each GPU writes to its own JSONL file named with its index range
 jsonl_filename = f'{base_name}_{args.start_idx}_{end_idx}.jsonl'
