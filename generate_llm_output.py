@@ -198,12 +198,25 @@ def build_prompt(entry: dict) -> str:
 
 # ── Parse LLM response ─────────────────────────────────────────────────────────
 
-def parse_answer(text: str, num_candidates: int):
-    """Take the last valid integer in [1, num_candidates] — LLM reasons before answering."""
-    for m in reversed(re.findall(r'\b(\d+)\b', text)):
-        val = int(m)
-        if 1 <= val <= num_candidates:
-            return val
+def parse_answer(text: str, num_candidates: int, first: bool = False):
+    """Extract a valid integer in [1, num_candidates] from the model's response.
+
+    first=True  — take the first valid integer (use when --prime prepends the
+                  response template; the model outputs the answer before reasoning)
+    first=False — take the last valid integer (use without --prime; the model
+                  reasons first and gives the answer at the end)
+    """
+    matches = re.findall(r'\b(\d+)\b', text)
+    if first:
+        for m in matches:
+            val = int(m)
+            if 1 <= val <= num_candidates:
+                return val
+    else:
+        for m in reversed(matches):
+            val = int(m)
+            if 1 <= val <= num_candidates:
+                return val
     return None
 
 
@@ -268,7 +281,7 @@ def flush_chunk(chunk_entries, jsonl_file):
     for entry, result in zip(chunk_entries, results):
         text           = result.outputs[0].text
         num_candidates = len(entry['choices'])
-        answer         = parse_answer(text, num_candidates)
+        answer         = parse_answer(text, num_candidates, first=args.prime)
         if answer is None:
             none_count += 1
         jsonl_file.write(json.dumps({'final_answer': answer, 'raw_response': text}) + '\n')
