@@ -44,7 +44,7 @@ parser.add_argument('--batch_size', type=int, default=4,
                     help='Per-device training batch size')
 parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
                     help='Accumulate gradients over N steps before updating weights')
-parser.add_argument('--learning_rate', type=float, default=2e-4)
+parser.add_argument('--learning_rate', type=float, default=5e-5)
 parser.add_argument('--lora_r', type=int, default=16,
                     help='LoRA rank — higher = more parameters, more capacity')
 parser.add_argument('--lora_alpha', type=int, default=32,
@@ -78,7 +78,10 @@ MODEL_LABELS = {
     'HypergraphBranch': 'the hypergraph branch',
 }
 
-RESPONSE_TEMPLATE = '### Selected candidate: '
+# Use LLaMA-3.1 assistant header as the response template — these are special
+# tokens in the vocabulary so they tokenise completely consistently, making
+# DataCollatorForCompletionOnlyLM reliable across all training examples.
+RESPONSE_TEMPLATE = '<|start_header_id|>assistant<|end_header_id|>\n\n'
 
 
 # ── Load adjacency for spatial info ───────────────────────────────────────────
@@ -152,15 +155,16 @@ def build_prompt(entry: dict) -> str:
 
 
 def build_training_text(entry: dict) -> str:
-    """Full training text = prompt + response template + ground truth answer.
-
-    The newline before the template is kept in the text but excluded from
-    RESPONSE_TEMPLATE itself so DataCollatorForCompletionOnlyLM can find
-    the token sequence reliably (leading \\n shifts token boundaries).
-    """
-    prompt      = build_prompt(entry)
-    answer      = str(entry['optimal_idx'] + 1)  # convert 0-indexed to 1-indexed
-    return prompt + '\n' + RESPONSE_TEMPLATE + answer
+    """Format as a LLaMA-3.1 chat turn so the response template is a special
+    token sequence that DataCollatorForCompletionOnlyLM can find reliably."""
+    prompt = build_prompt(entry)
+    answer = str(entry['optimal_idx'] + 1)  # convert 0-indexed to 1-indexed
+    return (
+        '<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n'
+        f'{prompt}<|eot_id|>'
+        '<|start_header_id|>assistant<|end_header_id|>\n\n'
+        f'{answer}<|eot_id|>'
+    )
 
 
 # ── Sample entries from choices file using reservoir sampling ─────────────────
