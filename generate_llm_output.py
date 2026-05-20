@@ -58,6 +58,9 @@ parser.add_argument('--lora_r', type=int, default=16,
 parser.add_argument('--prime', action='store_true', default=False,
                     help='Append the response template to each prompt so the model '
                          'completes with a number rather than continuing the candidate list')
+parser.add_argument('--save_prompts', type=int, default=0,
+                    help='Save the first N examples (prompt + response + ground truth) '
+                         'to a JSON file for analysis/evaluation. 0 = disabled.')
 parser.add_argument('--start_idx', type=int, default=0,
                     help='Global entry index to start from (inclusive)')
 parser.add_argument('--end_idx', type=int, default=None,
@@ -266,25 +269,43 @@ def truncate_prompt(prompt: str) -> str:
 
 # ── Main loop — stream input, write output line by line ───────────────────────
 
-chunk_entries = []
-global_idx    = 0
+chunk_entries  = []
+global_idx     = 0
+saved_examples = []   # accumulated for --save_prompts
 
 def flush_chunk(chunk_entries, jsonl_file):
     """Run vllm on a chunk and append results to the JSONL file."""
-    global none_count
+    global none_count, saved_examples
     prompts = [truncate_prompt(build_prompt(e)) for e in chunk_entries]
     results = []
     for batch_start in range(0, len(prompts), args.batch_size):
         batch   = prompts[batch_start:batch_start + args.batch_size]
         outputs = llm.generate(batch, sampling_params, lora_request=lora_request)
         results.extend(outputs)
-    for entry, result in zip(chunk_entries, results):
+    for entry, prompt, result in zip(chunk_entries, prompts, results):
         text           = result.outputs[0].text
         num_candidates = len(entry['choices'])
         answer         = parse_answer(text, num_candidates, first=args.prime)
         if answer is None:
             none_count += 1
         jsonl_file.write(json.dumps({'final_answer': answer, 'raw_response': text}) + '\n')
+
+        # Save examples for analysis if requested
+        if args.save_prompts > 0 and len(saved_examples) < args.save_prompts:
+            saved_examples.append({
+                'node_idx':          entry['node_idx'],
+                'input_start_time':  entry['input_start_time'],
+                'input_end_time':    entry['input_end_time'],
+                'output_start_time': entry['output_start_time'],
+                'output_end_time':   entry['output_end_time'],
+                'optimal_idx':       entry['optimal_idx'],          # ground truth (0-indexed)
+                'optimal_answer':    entry['optimal_idx'] + 1,      # ground truth (1-indexed)
+                'llm_answer':        answer,                        # LLM selection (1-indexed)
+                'correct':           answer == entry['optimal_idx'] + 1,
+                'prompt':            prompt,
+                'raw_response':      text,
+            })
+
     jsonl_file.flush()
 
 print(f'Streaming entries from {choices_path}...')
@@ -326,3 +347,17 @@ print(f'\nGPU chunk complete. Entries {args.start_idx} to {end_idx} done.')
 print(f'Unparseable: {none_count}')
 print(f'Output: {jsonl_path}')
 print(f'Run combine_llm_output.py once all GPUs are finished.')
+
+# ── Save prompt examples for analysis ────────────────────────────────────────
+
+if args.save_prompts > 0 and saved_examples:
+    n_correct = sum(1 for e in saved_examples if e['correct'])
+    accuracy  = n_correct / len(saved_examples) * 100
+    examples_path = os.path.join(
+        args.output_dir,
+        f'{base_name}_{args.start_idx}_{end_idx}_examples.json'
+    )
+    with open(examples_path, 'w') as f:
+        json.dump({'accuracy': accuracy, 'examples': saved_examples}, f, indent=2)
+    print(f'\nSaved {len(saved_examples)} examples to: {examples_path}')
+    print(f'Accuracy on saved examples: {accuracy:.1f}% ({n_correct}/{len(saved_examples)})')
