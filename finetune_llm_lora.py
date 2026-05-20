@@ -54,6 +54,7 @@ parser.add_argument('--lora_dropout', type=float, default=0.05)
 parser.add_argument('--max_seq_len', type=int, default=2048,
                     help='Max token length for training examples')
 parser.add_argument('--seed', type=int, default=42)
+parser.add_argument('--logging_steps', type=int, default=100)
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -254,7 +255,7 @@ training_args = TrainingArguments(
     learning_rate=args.learning_rate,
     bf16=True,
     fp16=False,
-    logging_steps=100,
+    logging_steps=args.logging_steps,
     save_strategy='steps',
     save_steps=500,
     save_total_limit=5,         # keep the 5 most recent checkpoints
