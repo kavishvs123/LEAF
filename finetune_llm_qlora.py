@@ -202,9 +202,48 @@ from transformers import (
     AutoTokenizer,
     TrainingArguments,
     BitsAndBytesConfig,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
 )
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
+import csv
+
+
+# ── Training log callback ─────────────────────────────────────────────────────
+
+class CsvLogCallback(TrainerCallback):
+    """Saves training metrics to a CSV file after every logging step.
+
+    Columns: step, epoch, loss, learning_rate, grad_norm
+    Suitable for plotting training curves.
+    """
+    def __init__(self, log_path: str):
+        self.log_path  = log_path
+        self._wrote_header = False
+
+    def on_log(self, args, state: TrainerState, control: TrainerControl, logs=None, **kwargs):
+        if logs is None:
+            return
+        if 'loss' not in logs:
+            return
+        row = {
+            'step':          state.global_step,
+            'epoch':         round(state.epoch, 4) if state.epoch else '',
+            'loss':          logs.get('loss', ''),
+            'learning_rate': logs.get('learning_rate', ''),
+            'grad_norm':     logs.get('grad_norm', ''),
+        }
+        write_header = not self._wrote_header and not os.path.exists(self.log_path)
+        with open(self.log_path, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=row.keys())
+            if write_header:
+                writer.writeheader()
+                self._wrote_header = True
+            writer.writerow(row)
+        if not self._wrote_header:
+            self._wrote_header = True
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -269,6 +308,9 @@ training_args = TrainingArguments(
     seed=args.seed,
 )
 
+log_path = os.path.join(args.output_dir, f'{args.dataset.lower()}_qlora_training_log.csv')
+print(f'Training log will be saved to: {log_path}')
+
 trainer = SFTTrainer(
     model=model,
     args=training_args,
@@ -277,6 +319,7 @@ trainer = SFTTrainer(
     dataset_text_field='text',
     max_seq_length=args.max_seq_len,
     tokenizer=tokenizer,
+    callbacks=[CsvLogCallback(log_path)],
 )
 
 print('Starting fine-tuning...')
