@@ -55,6 +55,9 @@ parser.add_argument('--lora_path', type=str, default=None,
                          'If provided, the adapter is loaded on top of --model_path.')
 parser.add_argument('--lora_r', type=int, default=16,
                     help='LoRA rank used during fine-tuning (must match adapter)')
+parser.add_argument('--prime', action='store_true', default=False,
+                    help='Append the response template to each prompt so the model '
+                         'completes with a number rather than continuing the candidate list')
 parser.add_argument('--start_idx', type=int, default=0,
                     help='Global entry index to start from (inclusive)')
 parser.add_argument('--end_idx', type=int, default=None,
@@ -189,6 +192,7 @@ def build_prompt(entry: dict) -> str:
         f'the rush hour).\n'
         f'Please first think carefully and then select the most likely one:\n'
         f'{candidates_str}'
+        + ('\n### Selected candidate: ' if args.prime else '')
     )
 
 
