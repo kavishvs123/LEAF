@@ -49,6 +49,11 @@ parser.add_argument('--expid', type=str, default='debug', help='experiment id')
 parser.add_argument('--csv', type=str, default='./outputs/', help='csv path')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump', help='dump path')
 parser.add_argument('--dump', default=False, action='store_true', help='dump results')
+# [ADDED] Separate postfix for the LLM output file so different model variants (base, lora, qlora)
+# can be selected without renaming files. Falls back to args.postfix if not set.
+parser.add_argument('--llm_postfix', type=str, default=None,
+                    help='Postfix for the LLM output JSON read by LLMSelectorFromJson '
+                         '(e.g. _lora, _qlora, _primed). Defaults to args.postfix if not set.')
 
 parser.add_argument('--ckpt_paths', type=str, nargs='+', default=[], help='pretrained model paths')
 parser.add_argument('--disable_aug', default=False, action='store_true', help='disable augmentation')
@@ -101,3 +106,8 @@ elif args.update_iters not in [0, 5]:
     args.postfix = f'_update{args.update_iters}'
 else:
     args.postfix = ''
+
+# [ADDED] Resolve llm_postfix: if not explicitly provided, fall back to args.postfix
+# so existing behaviour is unchanged for runs that don't pass --llm_postfix.
+if args.llm_postfix is None:
+    args.llm_postfix = args.postfix
