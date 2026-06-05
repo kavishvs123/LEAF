@@ -55,6 +55,7 @@ parser.add_argument('--max_seq_len', type=int, default=2048,
                     help='Max token length for training examples')
 parser.add_argument('--seed', type=int, default=42)
 parser.add_argument('--logging_steps', type=int, default=100)
+parser.add_argument('--warmup_steps', type=int, default=500)  # [ADDED] expose warmup_steps as CLI arg
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -299,7 +300,7 @@ training_args = TrainingArguments(
     save_strategy='steps',
     save_steps=500,
     save_total_limit=5,         # keep the 5 most recent checkpoints
-    warmup_steps=500,
+    warmup_steps=args.warmup_steps,  # [CHANGED] use CLI arg instead of hardcoded 500
     lr_scheduler_type='cosine',
     report_to='none',
     seed=args.seed,
