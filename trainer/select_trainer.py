@@ -56,7 +56,10 @@ class SelectTrainer:
         logger.info('Pretraining finished')
 
         outputs, targets = [], []
-        pbar = tqdm(enumerate(self.test_loader), total=len(self.test_loader))
+        # [CHANGED] Select loader based on --dump_split so training choices can be dumped
+        # for LLM fine-tuning. Default is 'test', preserving the original behaviour.
+        dump_loader = {'train': self.train_loader, 'val': self.val_loader, 'test': self.test_loader}[args.dump_split]
+        pbar = tqdm(enumerate(dump_loader), total=len(dump_loader))
         interval = 1
         for iter, data in pbar:
             move_data(data, args.device)

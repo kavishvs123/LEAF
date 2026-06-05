@@ -49,6 +49,11 @@ parser.add_argument('--expid', type=str, default='debug', help='experiment id')
 parser.add_argument('--csv', type=str, default='./outputs/', help='csv path')
 parser.add_argument('--dump_dir', type=str, default='./outputs/dump', help='dump path')
 parser.add_argument('--dump', default=False, action='store_true', help='dump results')
+# [ADDED] Controls which data split is iterated when --dump is set.
+# Use 'train' to generate training choices for LLM fine-tuning (methodologically
+# clean alternative to the default test-set dump used by the original authors).
+parser.add_argument('--dump_split', type=str, default='test', choices=['train', 'val', 'test'],
+                    help='Data split to dump choices from. Default is test (original behaviour).')
 # [ADDED] Separate postfix for the LLM output file so different model variants (base, lora, qlora)
 # can be selected without renaming files. Falls back to args.postfix if not set.
 parser.add_argument('--llm_postfix', type=str, default=None,

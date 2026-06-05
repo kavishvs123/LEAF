@@ -7,7 +7,10 @@ import os
 
 def build_adapter_from_cfg():
     if args.selector_type == 'optimal':
-        selector = OptimalSelector(os.path.join(args.dump_dir, f'{args.dataset.lower()}_choices{args.postfix}.json'))
+        # [CHANGED] Append _train or _val to the choices filename when dumping a non-test
+        # split, so training/validation dumps don't overwrite pems08_choices.json (test dump).
+        _split_suffix = f'_{args.dump_split}' if args.dump_split != 'test' else ''
+        selector = OptimalSelector(os.path.join(args.dump_dir, f'{args.dataset.lower()}_choices{_split_suffix}{args.postfix}.json'))
     elif args.selector_type == 'llm':
         selector = LLMSelectorFromJson(
             # [CHANGED] use args.llm_postfix (not args.postfix) so --llm_postfix _lora/_qlora
