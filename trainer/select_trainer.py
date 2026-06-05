@@ -58,7 +58,15 @@ class SelectTrainer:
         outputs, targets = [], []
         # [CHANGED] Select loader based on --dump_split so training choices can be dumped
         # for LLM fine-tuning. Default is 'test', preserving the original behaviour.
-        dump_loader = {'train': self.train_loader, 'val': self.val_loader, 'test': self.test_loader}[args.dump_split]
+        # Non-test splits are rebuilt with batch_size=1 (matching test_loader) because
+        # AugAdapter asserts data['y'].size(0) == 1 and train/val loaders use args.batch_size.
+        from torch.utils.data import DataLoader
+        if args.dump_split == 'train':
+            dump_loader = DataLoader(self.train_loader.dataset, batch_size=1, shuffle=False)
+        elif args.dump_split == 'val':
+            dump_loader = DataLoader(self.val_loader.dataset, batch_size=1, shuffle=False)
+        else:
+            dump_loader = self.test_loader
         pbar = tqdm(enumerate(dump_loader), total=len(dump_loader))
         interval = 1
         for iter, data in pbar:
