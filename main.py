@@ -1,3 +1,9 @@
+import torch
+# [ADDED] Disable cuDNN to prevent CUDNN_STATUS_NOT_INITIALIZED hang in smooth_output's
+# F.conv2d call. The system cuDNN (9.2.0) conflicts with PyTorch's bundled version (9.1.0).
+# This has no effect on model accuracy — it falls back to PyTorch's native convolution.
+torch.backends.cudnn.enabled = False
+
 from cfg import args
 from trainer import build_trainer_from_cfg
 from dataset import get_dataloader
