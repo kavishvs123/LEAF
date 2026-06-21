@@ -276,7 +276,18 @@ saved_examples = []   # accumulated for --save_prompts
 def flush_chunk(chunk_entries, jsonl_file):
     """Run vllm on a chunk and append results to the JSONL file."""
     global none_count, saved_examples
-    prompts = [truncate_prompt(build_prompt(e)) for e in chunk_entries]
+    # [CHANGED] When using a fine-tuned LoRA adapter, wrap prompts in the LLaMA chat
+    # template to match the format used during fine-tuning. Without these special tokens
+    # the fine-tuned model won't recognise the input format correctly.
+    if args.lora_path:
+        prompts = [
+            '<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n'
+            + truncate_prompt(build_prompt(e))
+            + '<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
+            for e in chunk_entries
+        ]
+    else:
+        prompts = [truncate_prompt(build_prompt(e)) for e in chunk_entries]
     results = []
     for batch_start in range(0, len(prompts), args.batch_size):
         batch   = prompts[batch_start:batch_start + args.batch_size]
@@ -285,7 +296,9 @@ def flush_chunk(chunk_entries, jsonl_file):
     for entry, prompt, result in zip(chunk_entries, prompts, results):
         text           = result.outputs[0].text
         num_candidates = len(entry['choices'])
-        answer         = parse_answer(text, num_candidates, first=args.prime)
+        # [CHANGED] Fine-tuned model outputs the answer first (trained to do so);
+        # use first=True in that case regardless of --prime flag.
+        answer         = parse_answer(text, num_candidates, first=args.prime or bool(args.lora_path))
         if answer is None:
             none_count += 1
         jsonl_file.write(json.dumps({'final_answer': answer, 'raw_response': text}) + '\n')
