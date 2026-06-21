@@ -41,6 +41,11 @@ parser.add_argument('--chunk_size', type=int, default=1000,
                     help='Number of entries to process before flushing to disk')
 parser.add_argument('--max_tokens', type=int, default=128,
                     help='Max output tokens per prompt (chain-of-thought)')
+# [ADDED] Separate token budget for fine-tuned LoRA models — they output just
+# a single digit then stop, so 128 causes degenerate repetition loops.
+parser.add_argument('--max_tokens_lora', type=int, default=5,
+                    help='Max output tokens when --lora_path is set. Fine-tuned models '
+                         'output a single digit so 5 is sufficient and prevents repetition.')
 parser.add_argument('--temperature', type=float, default=0.0)
 parser.add_argument('--max_model_len', type=int, default=16384,
                     help='Max sequence length for vllm KV cache — reduce if GPU OOM')
@@ -251,13 +256,24 @@ else:
     )
     lora_request = None
 
-sampling_params = SamplingParams(
-    temperature=args.temperature,
-    max_tokens=args.max_tokens,
-)
+# [CHANGED] When using a fine-tuned LoRA adapter:
+#   - cap output at max_tokens_lora (default 5) — the model outputs one digit then stops,
+#     so 128 tokens causes degenerate repetition loops filling the token budget
+#   - add <|eot_id|> as a stop token so vllm halts where the model was trained to stop
+if args.lora_path:
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        max_tokens=args.max_tokens_lora,
+        stop=["<|eot_id|>"],
+    )
+else:
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+    )
 
 tokenizer         = AutoTokenizer.from_pretrained(args.model_path)
-max_prompt_tokens = args.max_model_len - args.max_tokens
+max_prompt_tokens = args.max_model_len - (args.max_tokens_lora if args.lora_path else args.max_tokens)
 
 def truncate_prompt(prompt: str) -> str:
     tokens = tokenizer.encode(prompt)
