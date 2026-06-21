@@ -259,12 +259,15 @@ else:
 # [CHANGED] When using a fine-tuned LoRA adapter:
 #   - cap output at max_tokens_lora (default 5) — the model outputs one digit then stops,
 #     so 128 tokens causes degenerate repetition loops filling the token budget
-#   - add <|eot_id|> as a stop token so vllm halts where the model was trained to stop
+#   - stop on token ID 128009 (<|eot_id|> in LLaMA 3.1) so vllm halts where the model
+#     was trained to stop. stop_token_ids is used instead of stop=["<|eot_id|>"] because
+#     vllm matches stop strings against decoded text, which may not reliably trigger on
+#     special tokens — stop_token_ids matches at the token level before decoding.
 if args.lora_path:
     sampling_params = SamplingParams(
         temperature=args.temperature,
         max_tokens=args.max_tokens_lora,
-        stop=["<|eot_id|>"],
+        stop_token_ids=[128009],
     )
 else:
     sampling_params = SamplingParams(
@@ -285,9 +288,29 @@ def truncate_prompt(prompt: str) -> str:
 
 # ── Main loop — stream input, write output line by line ───────────────────────
 
-chunk_entries  = []
-global_idx     = 0
-saved_examples = []   # accumulated for --save_prompts
+chunk_entries     = []
+global_idx        = 0
+saved_examples    = []   # accumulated for --save_prompts
+examples_written  = False  # [ADDED] flag so we only write the examples file once
+
+# [ADDED] Write examples to disk as soon as all save_prompts examples are collected.
+# Previously this only happened at the very end of the run (hours later). Now the file
+# appears after the first ~save_prompts entries are processed.
+def _flush_examples():
+    global examples_written
+    if examples_written or not saved_examples:
+        return
+    n_correct     = sum(1 for e in saved_examples if e['correct'])
+    accuracy      = n_correct / len(saved_examples) * 100
+    examples_path = os.path.join(
+        args.output_dir,
+        f'{base_name}_{args.start_idx}_{end_idx}_examples.json'
+    )
+    with open(examples_path, 'w') as f:
+        json.dump({'accuracy': accuracy, 'examples': saved_examples}, f, indent=2)
+    examples_written = True
+    print(f'\nSaved {len(saved_examples)} examples to: {examples_path}')
+    print(f'Accuracy on saved examples: {accuracy:.1f}% ({n_correct}/{len(saved_examples)})')
 
 def flush_chunk(chunk_entries, jsonl_file):
     """Run vllm on a chunk and append results to the JSONL file."""
@@ -334,6 +357,10 @@ def flush_chunk(chunk_entries, jsonl_file):
                 'prompt':            prompt,
                 'raw_response':      text,
             })
+            # [ADDED] Write to disk as soon as we have collected all requested examples
+            # so the file is available immediately rather than at end of the full run.
+            if len(saved_examples) == args.save_prompts:
+                _flush_examples()
 
     jsonl_file.flush()
 
@@ -379,14 +406,7 @@ print(f'Run combine_llm_output.py once all GPUs are finished.')
 
 # ── Save prompt examples for analysis ────────────────────────────────────────
 
-if args.save_prompts > 0 and saved_examples:
-    n_correct = sum(1 for e in saved_examples if e['correct'])
-    accuracy  = n_correct / len(saved_examples) * 100
-    examples_path = os.path.join(
-        args.output_dir,
-        f'{base_name}_{args.start_idx}_{end_idx}_examples.json'
-    )
-    with open(examples_path, 'w') as f:
-        json.dump({'accuracy': accuracy, 'examples': saved_examples}, f, indent=2)
-    print(f'\nSaved {len(saved_examples)} examples to: {examples_path}')
-    print(f'Accuracy on saved examples: {accuracy:.1f}% ({n_correct}/{len(saved_examples)})')
+# [CHANGED] Use _flush_examples() which is a no-op if already written mid-run.
+# This handles the edge case where the total entries < save_prompts.
+if args.save_prompts > 0:
+    _flush_examples()
