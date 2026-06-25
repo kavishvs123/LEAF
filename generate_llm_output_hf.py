@@ -45,9 +45,10 @@ parser.add_argument('--batch_size', type=int, default=4,
                          'Lower than vllm default due to KV cache memory with long prompts.')
 parser.add_argument('--chunk_size', type=int, default=1000,
                     help='Number of entries to process before flushing to disk')
-parser.add_argument('--max_new_tokens', type=int, default=2,
-                    help='Max new tokens to generate. Answers are 1-12 so 2 tokens is '
-                         'sufficient (1 token for single digits, 2 for 10-12).')
+parser.add_argument('--max_new_tokens', type=int, default=1,
+                    help='Max new tokens to generate. Answers 1-12 are each a single token '
+                         'in LLaMA tokenizer (confirmed by "1010" pattern with 2 tokens), '
+                         'so 1 is sufficient and avoids repetition ambiguity.')
 parser.add_argument('--max_prompt_tokens', type=int, default=2048,
                     help='Truncate prompts longer than this many tokens')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
