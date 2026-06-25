@@ -45,9 +45,9 @@ parser.add_argument('--batch_size', type=int, default=4,
                          'Lower than vllm default due to KV cache memory with long prompts.')
 parser.add_argument('--chunk_size', type=int, default=1000,
                     help='Number of entries to process before flushing to disk')
-parser.add_argument('--max_new_tokens', type=int, default=5,
-                    help='Max new tokens to generate. Fine-tuned model outputs a single '
-                         'digit so 5 is sufficient.')
+parser.add_argument('--max_new_tokens', type=int, default=2,
+                    help='Max new tokens to generate. Answers are 1-12 so 2 tokens is '
+                         'sufficient (1 token for single digits, 2 for 10-12).')
 parser.add_argument('--max_prompt_tokens', type=int, default=2048,
                     help='Truncate prompts longer than this many tokens')
 parser.add_argument('--round', type=int, default=1, choices=[1, 2],
@@ -196,12 +196,21 @@ def build_prompt(entry: dict) -> str:
 # ── Parse LLM response ────────────────────────────────────────────────────────
 
 def parse_answer(text: str, num_candidates: int):
-    """Extract the first valid integer in [1, num_candidates] from the model response.
-    Fine-tuned model outputs the answer first before any reasoning, so we take first match.
+    """Read the answer from the first 1-2 characters of the model response.
+    The fine-tuned model outputs the answer immediately (e.g. "7" or "12"), then
+    fills remaining tokens with noise because the stop token doesn't always fire.
+    Reading from the start avoids treating "77777" as the number 77,777.
     """
-    matches = re.findall(r'\b(\d+)\b', text)
-    for m in matches:
-        val = int(m)
+    # [CHANGED] Read from start of string: try 2-digit answer first (handles 10-12),
+    # then single digit. The old regex matched the whole repeated string as one large
+    # number which was never in [1, num_candidates].
+    text = text.strip()
+    if len(text) >= 2 and text[:2].isdigit():
+        val = int(text[:2])
+        if 1 <= val <= num_candidates:
+            return val
+    if text and text[0].isdigit():
+        val = int(text[0])
         if 1 <= val <= num_candidates:
             return val
     return None
